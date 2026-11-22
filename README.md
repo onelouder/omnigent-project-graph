@@ -93,9 +93,19 @@ To remove it:
 scripts/install.sh /path/to/omnigent --uninstall [--check]
 ```
 
-Uninstall validates the whole record first: every backup must match its
-recorded hash, and every path must stay inside the checkout with no symlink
-on the way. A corrupted or tampered record is refused, even with `--force`.
+Uninstall validates the whole record first. The record ends with a sha256
+checksum over everything above it; that is written last and checked first.
+Each field is also checked on its own:
+
+- hashes are well-formed for the repo's object format, or `ABSENT`;
+- no path appears twice, and the recorded file count matches;
+- a pre-install hash of `ABSENT` means no backup exists and the file was not
+  tracked at the install HEAD;
+- every other pre-install hash has a backup that matches it;
+- there are no stray backups;
+- every path stays inside the checkout with no symlink on the way.
+
+A record with any contradiction is refused and kept, even with `--force`.
 
 It then restores the recorded pre-install content exactly, so a
 3-way-merged install comes back byte-for-byte, and deletes only the files it
