@@ -172,12 +172,21 @@ ov_put_file() {
   mv -f -- "$temporary" "$destination" || { rm -f -- "$temporary"; return 1; }
 }
 
-# Load and fully validate a unit's record into OV_REC_* variables: every path
-# safe, every backup present and matching its recorded hash. Returns 0 when
-# valid, 1 when there is no record, 2 when it is invalid. Never modifies anything.
+# Checksum of a record's canonical content: every manifest line before the
+# final checksum line.
+ov_record_checksum() { head -n -1 -- "$1" | sha256sum | cut -d' ' -f1; }
+
+# Load and fully validate a unit's record into OV_REC_* variables. Checked
+# first: the record checksum (written last at install). Then, independently,
+# every field: well-formed hashes for this repo's object format, safe paths,
+# no duplicates, the recorded file count, pre=ABSENT only with no backup and
+# no file tracked at the install HEAD, pre!=ABSENT only with a backup that
+# matches, and no stray backups. Returns 0 when valid, 1 when there is no
+# record, 2 when it is invalid. Never modifies anything.
 ov_load_record() {
-  local unit="$1" state="$OV_STATE_ROOT/$1" manifest kind a b c extra backup state_real version="" problems=()
-  local -A seen=()
+  local unit="$1" state="$OV_STATE_ROOT/$1" manifest kind a b c extra backup state_real object_format hash_re index
+  local version="" files="" checksum="" file_lines=0 last_kind="" backups_expected=0 backups_found problems=()
+  local -A seen=() singletons=()
   OV_REC_STATE="$state" OV_REC_IDENTITY="" OV_REC_HEAD="" OV_REC_PATHS=() OV_REC_PRE=() OV_REC_POST=()
   manifest="$state/manifest.tsv"
   [[ -e "$state" || -L "$state" ]] || return 1
@@ -186,24 +195,39 @@ ov_load_record() {
     return 2
   fi
   state_real="$(realpath -e -- "$state")" || return 2
+  object_format="$(git -C "$OV_TARGET" rev-parse --show-object-format 2>/dev/null || echo sha1)"
+  if [[ "$object_format" == sha256 ]]; then hash_re='^([0-9a-f]{64}|ABSENT)$'; else hash_re='^([0-9a-f]{40}|ABSENT)$'; fi
   while IFS=$'\t' read -r kind a b c extra || [[ -n "$kind" ]]; do
+    last_kind="$kind"
     case "$kind" in
-      version) version="$a" ;;
-      identity) OV_REC_IDENTITY="$a" ;;
-      head) OV_REC_HEAD="$a" ;;
+      version | identity | head | files | checksum)
+        [[ -z "${singletons[$kind]:-}" ]] || problems+=("duplicate '$kind' line")
+        singletons["$kind"]=1
+        [[ -z "$b" ]] || problems+=("malformed '$kind' line")
+        case "$kind" in
+          version) version="$a" ;; identity) OV_REC_IDENTITY="$a" ;; head) OV_REC_HEAD="$a" ;;
+          files) files="$a" ;; checksum) checksum="$a" ;;
+        esac
+        ;;
       file)
+        file_lines=$((file_lines + 1))
         if [[ -n "$extra" ]] || ! ov_safe_path "$a"; then
           problems+=("unsafe or malformed path (absolute, '..', outside the checkout or through a symlink): ${a@Q}")
           continue
         fi
-        if [[ ! "$b" =~ ^([0-9a-f]{40}|[0-9a-f]{64}|ABSENT)$ || ! "$c" =~ ^([0-9a-f]{40}|[0-9a-f]{64}|ABSENT)$ ]]; then
-          problems+=("malformed hashes for $a")
+        if [[ ! "$b" =~ $hash_re || ! "$c" =~ $hash_re ]]; then
+          problems+=("malformed hash for $a (expected $object_format hex or ABSENT)")
           continue
         fi
         [[ -z "${seen[$a]:-}" ]] || { problems+=("duplicate path: $a"); continue; }
         seen["$a"]=1
-        if [[ "$b" != ABSENT ]]; then
-          backup="$state/pre/$a"
+        backup="$state/pre/$a"
+        if [[ "$b" == ABSENT ]]; then
+          if [[ -e "$backup" || -L "$backup" ]]; then
+            problems+=("pre-install hash is ABSENT but a backup exists: $a")
+          fi
+        else
+          backups_expected=$((backups_expected + 1))
           if [[ -L "$backup" || ! -f "$backup" ]]; then
             problems+=("backup missing: $a")
           elif [[ "$(realpath -e -- "$backup")" != "$state_real/pre/"* ]]; then
@@ -217,11 +241,32 @@ ov_load_record() {
       *) problems+=("unknown record line: ${kind@Q}") ;;
     esac
   done <"$manifest"
-  [[ "$version" == 2 ]] || problems+=("unsupported record version: ${version:-none}")
+  if [[ "$last_kind" != checksum || ! "$checksum" =~ ^[0-9a-f]{64}$ ]]; then
+    problems+=("missing or malformed record checksum (it must be the last line)")
+  elif [[ "$(ov_record_checksum "$manifest")" != "$checksum" ]]; then
+    problems+=("record checksum mismatch: the record was modified after install")
+  fi
+  [[ "$version" == 3 ]] || problems+=("unsupported record version: ${version:-none} (expected 3)")
   [[ "$OV_REC_HEAD" =~ ^([0-9a-f]{40}|[0-9a-f]{64}|NONE)$ ]] || problems+=("malformed install-time HEAD")
   [[ -n "$OV_REC_IDENTITY" ]] || problems+=("missing identity")
+  [[ "$files" =~ ^[0-9]+$ && "$files" -eq "$file_lines" ]] \
+    || problems+=("file count mismatch: the record says ${files:-nothing}, it has $file_lines file lines")
+  # pre=ABSENT must mean the install HEAD did not track the path either.
+  if [[ "$OV_REC_HEAD" =~ ^[0-9a-f]+$ ]] && git -C "$OV_TARGET" cat-file -e "$OV_REC_HEAD^{commit}" 2>/dev/null; then
+    for index in "${!OV_REC_PATHS[@]}"; do
+      if [[ "${OV_REC_PRE[index]}" == ABSENT ]] && git -C "$OV_TARGET" cat-file -e "$OV_REC_HEAD:${OV_REC_PATHS[index]}" 2>/dev/null; then
+        problems+=("pre-install hash is ABSENT but the install HEAD tracks the file: ${OV_REC_PATHS[index]}")
+      fi
+    done
+  elif [[ "$OV_REC_HEAD" != NONE ]]; then
+    problems+=("install-time HEAD ${OV_REC_HEAD:0:12} is not in this repository")
+  fi
+  if [[ -d "$state/pre" ]]; then
+    backups_found="$(find "$state/pre" ! -type d | wc -l)"
+    ((backups_found == backups_expected)) || problems+=("stray backups: $backups_found in the record, $backups_expected expected")
+  fi
   if ((${#problems[@]})); then
-    ov_err "the install record at $state is invalid; refusing to use it (even with --force):"
+    ov_err "the install record at $state is invalid; refusing to use it (even with --force). It is kept as is:"
     ov_list "${problems[@]}"
     return 2
   fi
@@ -245,7 +290,8 @@ ov_write_record() {
   local staging="$1" identity="$2" head path pre post from
   head="$(ov_head)" || return 1
   mkdir -- "$staging/pre" || return 1
-  printf 'version\t2\nidentity\t%s\nhead\t%s\n' "$identity" "$head" >"$staging/manifest.tsv" || return 1
+  printf 'version\t3\nidentity\t%s\nhead\t%s\nfiles\t%s\n' "$identity" "$head" \
+    "$(wc -l <"$OV_PLAN/plan.tsv" | tr -d ' ')" >"$staging/manifest.tsv" || return 1
   while IFS=$'\t' read -r path pre post from; do
     if [[ "$pre" != ABSENT ]]; then
       mkdir -p -- "$staging/pre/$(dirname -- "$path")" || return 1
@@ -254,6 +300,8 @@ ov_write_record() {
     fi
     printf 'file\t%s\t%s\t%s\n' "$path" "$pre" "$post" >>"$staging/manifest.tsv" || return 1
   done <"$OV_PLAN/plan.tsv"
+  # Seal the record last: a checksum over everything above it.
+  printf 'checksum\t%s\n' "$(cat -- "$staging/manifest.tsv" | sha256sum | cut -d' ' -f1)" >>"$staging/manifest.tsv" || return 1
 }
 
 # Store the record, then write the planned files and verify them. On any
