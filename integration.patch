@@ -1,0 +1,72 @@
+diff --git a/web/src/pages/ProjectHomePage.tsx b/web/src/pages/ProjectHomePage.tsx
+index ae076914a58376b3ab1256c0d3168758855b75f8..ce62fbee1528b4205f25e81eb73b7a50df3ced1c 100644
+--- a/web/src/pages/ProjectHomePage.tsx
++++ b/web/src/pages/ProjectHomePage.tsx
+@@ -15,6 +15,7 @@ import {
+ import { ProjectKanbanBoard } from "@/projectHome/ProjectKanbanBoard";
+ import { ProjectSessionPanel } from "@/projectHome/ProjectSessionPanel";
+ import { NewChatLandingScreen } from "@/shell/NewChatDialog";
++import { ProjectGraph, useShowsProjectGraph } from "@/projectGraph/ProjectGraph";
+ 
+ const SESSION_PANEL_DEFAULT_WIDTH_VW = 40;
+ const SESSION_PANEL_MIN_WIDTH_PX = 360;
+@@ -38,6 +39,7 @@ export function ProjectHomePage() {
+   const [searchParams] = useSearchParams();
+   const panelSessionId = isMobile ? null : searchParams.get(PROJECT_PANEL_SESSION_PARAM);
+   const replaceSearchParams = useReplaceSearchParams();
++  const showsGraph = useShowsProjectGraph();
+   const closePanel = useCallback(() => {
+     const next = new URLSearchParams(searchParams);
+     next.delete(PROJECT_PANEL_SESSION_PARAM);
+@@ -84,14 +86,23 @@ export function ProjectHomePage() {
+         extraTop={isMobile ? "0.75rem" : "4rem"}
+         extraBottom="0px"
+       >
+-        <ProjectKanbanBoard
+-          projectName={projectName}
+-          searchQuery={searchQuery}
+-          quickViewHref={isMobile ? undefined : projectSessionPanelSearch}
+-          selectedSessionId={panelSessionId}
+-          onCloseQuickView={closePanel}
+-          overlayClearance={composerOpen ? "10rem" : undefined}
+-        />
++        {showsGraph ? (
++          <ProjectGraph
++            projectName={projectName}
++            selectedSessionId={panelSessionId}
++            quickViewEnabled={!isMobile}
++            onCloseQuickView={closePanel}
++          />
++        ) : (
++          <ProjectKanbanBoard
++            projectName={projectName}
++            searchQuery={searchQuery}
++            quickViewHref={isMobile ? undefined : projectSessionPanelSearch}
++            selectedSessionId={panelSessionId}
++            onCloseQuickView={closePanel}
++            overlayClearance={composerOpen ? "10rem" : undefined}
++          />
++        )}
+         {panelSessionId !== null && (
+           <aside
+             aria-label="Session quick view"
+diff --git a/web/src/projectHome/ProjectHomeHeader.tsx b/web/src/projectHome/ProjectHomeHeader.tsx
+index 7aa6bf82a0f5c60d8c8467e69bb2e8f9ed5b95fa..66a4c9f623101e9730e9873328fa051823eec02c 100644
+--- a/web/src/projectHome/ProjectHomeHeader.tsx
++++ b/web/src/projectHome/ProjectHomeHeader.tsx
+@@ -10,6 +10,7 @@ import {
+ import { useCallback, useRef } from "react";
+ import { create } from "zustand";
+ import { ProjectLandingIcon } from "@/components/ProjectIconPicker";
++import { ProjectGraphViewToggle } from "@/projectGraph/ProjectGraphViewToggle";
+ import { useProjectHomePaletteCommands } from "@/projectHome/useProjectHomePaletteCommands";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+@@ -91,6 +92,7 @@ export function ProjectHomeHeaderActions({ projectName }: { projectName: string
+   const isMobile = useIsMobileViewport();
+   return (
+     <>
++      <ProjectGraphViewToggle />
+       <ProjectBoardSearch />
+       <ProjectNewSessionButton projectName={projectName} />
+       {isMobile && <ProjectHomeActions projectName={projectName} />}
