@@ -1,0 +1,9 @@
+Omnigent Project Graph
+Copyright 2026 The Omnigent Project Graph authors
+
+This is an overlay for Omnigent (https://github.com/omnigent-ai/omnigent),
+which is licensed under the Apache License, Version 2.0. It is installed into
+an Omnigent checkout and uses Omnigent's web components, hooks and APIs.
+It is not part of, or endorsed by, the Omnigent project.
+
+This overlay is also licensed under the Apache License, Version 2.0; see LICENSE.
