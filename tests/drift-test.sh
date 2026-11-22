@@ -226,6 +226,55 @@ check "other files restored and removed" '[[ "$(git -C "$FIXTURE" hash-object --
 check "fixture clean, record removed" '[[ -z "$(git -C "$FIXTURE" status --porcelain)" && ! -e "$(git -C "$FIXTURE" rev-parse --absolute-git-dir)/omnigent-stack/project-graph" ]]'
 check "no temp files or dirs left behind" '[[ -z "$(ls -A "$TMPDIR")" ]]'
 
+echo "== (m) tampered install records are refused, even with --force, and kept"
+# Set one field of the file line for $2 (field 3 = pre hash, 4 = post hash) to $3.
+set_record_field() {
+  awk -F'\t' -v OFS='\t' -v path="$2" -v field="$3" -v value="$4" \
+    '$1 == "file" && $2 == path { $field = value } { print }' "$1/manifest.tsv" >"$1/manifest.new" \
+    && mv "$1/manifest.new" "$1/manifest.tsv"
+}
+duplicate_record_line() { awk -F'\t' -v path="$2" '{ print } $1 == "file" && $2 == path { print }' "$1/manifest.tsv" >"$1/manifest.new" && mv "$1/manifest.new" "$1/manifest.tsv"; }
+# Recompute the checksum so that only the per-field checks can catch the tampering.
+reseal_record() { sed -i '$d' "$1/manifest.tsv"; printf 'checksum\t%s\n' "$(sha256sum <"$1/manifest.tsv" | cut -d' ' -f1)" >>"$1/manifest.tsv"; }
+record_field() { awk -F'\t' -v path="$2" -v field="$3" '$1 == "file" && $2 == path { print $field }' "$1/manifest.tsv"; }
+expect_record_refused() {
+  local label="$1" pattern="$2" before manifest_before
+  before="$(snapshot)"
+  manifest_before="$(sha1sum <"$RECORD/manifest.tsv")"
+  check "$label: uninstall refuses" '! run --uninstall && output_has "$pattern"'
+  check "$label: uninstall --force refuses the same way" '! run --uninstall --force && output_has "$pattern" && output_has "even with --force"'
+  check "$label: install refuses too" '! run && output_has "$pattern"'
+  check "$label: nothing changed; record and backups kept" '[[ "$(snapshot)" == "$before" && "$(sha1sum <"$RECORD/manifest.tsv")" == "$manifest_before" && -f "$RECORD/pre/$PAGE" && -f "$RECORD/pre/$HEADER" ]]'
+}
+for variant in raw resealed; do
+  reset_checkout; run
+  set_record_field "$RECORD" "$PAGE" 3 ABSENT
+  if [[ "$variant" == raw ]]; then pattern="checksum mismatch"; else reseal_record "$RECORD"; pattern="ABSENT but a backup exists: $PAGE"; fi
+  expect_record_refused "pre-hash -> ABSENT, backup intact ($variant)" "$pattern"
+  [[ "$variant" == raw ]] || check "pre-hash -> ABSENT ($variant): the install-HEAD check fires too" 'output_has "ABSENT but the install HEAD tracks the file: $PAGE"'
+
+  reset_checkout; run
+  set_record_field "$RECORD" "$PAGE" 3 "$(record_field "$RECORD" "$HEADER" 3)"
+  if [[ "$variant" == raw ]]; then pattern="checksum mismatch"; else reseal_record "$RECORD"; pattern="backup corrupted \(hash mismatch\): $PAGE"; fi
+  expect_record_refused "pre-hash -> another valid hash ($variant)" "$pattern"
+
+  reset_checkout; run
+  set_record_field "$RECORD" "$PAGE" 4 not-a-hash
+  if [[ "$variant" == raw ]]; then pattern="checksum mismatch"; else reseal_record "$RECORD"; pattern="malformed hash for $PAGE"; fi
+  expect_record_refused "malformed hash string ($variant)" "$pattern"
+
+  reset_checkout; run
+  duplicate_record_line "$RECORD" "$PAGE"
+  if [[ "$variant" == raw ]]; then pattern="checksum mismatch"; else reseal_record "$RECORD"; pattern="duplicate path: $PAGE"; fi
+  expect_record_refused "duplicate path entry ($variant)" "$pattern"
+  [[ "$variant" == raw ]] || check "duplicate path entry ($variant): the file count check fires too" 'output_has "file count mismatch"'
+done
+# A post-hash swapped for another valid-looking hash is consistent field by
+# field; the record checksum is what catches it.
+reset_checkout; run
+set_record_field "$RECORD" "$PAGE" 4 "$(record_field "$RECORD" "$HEADER" 4)"
+expect_record_refused "post-hash corrupted" "checksum mismatch"
+
 reset_checkout
 echo
 echo "drift-test: $passed passed, $failed failed"
