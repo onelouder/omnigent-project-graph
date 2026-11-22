@@ -93,12 +93,30 @@ To remove it:
 scripts/install.sh /path/to/omnigent --uninstall [--check]
 ```
 
-Uninstall restores the recorded pre-install content exactly, so a 3-way-merged
-install comes back byte-for-byte. It first verifies that every installed file
-is unchanged and that `web/src/projectGraph` has no files it did not install.
-If not, it lists them and refuses without changing anything. With `--force`
-it restores anyway, prints a warning naming every overwritten file, and still
-never deletes files it did not install.
+Uninstall validates the whole record first: every backup must match its
+recorded hash, and every path must stay inside the checkout with no symlink
+on the way. A corrupted or tampered record is refused, even with `--force`.
+
+It then restores the recorded pre-install content exactly, so a
+3-way-merged install comes back byte-for-byte, and deletes only the files it
+installed. The record is removed only after every restored file is verified
+by hash. If a write fails, the record is kept, the output says which files
+were and weren't restored, and re-running `--uninstall` finishes the job.
+
+It refuses, changing nothing, when installed files were edited or
+`web/src/projectGraph` holds files it did not install. `--force` restores
+anyway, names every overwritten file in a warning, and still never deletes
+files it did not install.
+
+**Upgrading Omnigent:** uninstall *before* moving the checkout to a new
+commit, then install again. The record notes the commit it was installed on.
+If HEAD has moved, uninstall refuses rather than restore pre-install content
+taken from the old commit. `--force` then restores only files still exactly
+as installed whose installed content the new HEAD does not track, and warns
+about each file it leaves alone.
+
+Install never writes through a symlink or outside the checkout. A symlinked
+`web/src/projectGraph` (or a symlinked parent) is refused, even with `--force`.
 
 ## Verify
 
@@ -125,6 +143,16 @@ This creates a throwaway `git worktree` of the given ref and exercises:
 - conflicting drift, which is refused with the checkout unchanged;
 - a foreign file in `web/src/projectGraph`;
 - a refused uninstall, which leaves the checkout untouched.
+
+It also covers:
+
+- a failed restore, which keeps the record and can be re-run;
+- a failed install write, which is rolled back;
+- deleted and corrupted backups;
+- a `../` record path;
+- a symlinked target;
+- HEAD moving between install and uninstall, using a fixture repo;
+- no temp files left behind.
 
 It removes the worktree afterwards.
 
