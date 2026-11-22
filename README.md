@@ -49,6 +49,8 @@ integration.patch     the hook into web/src/pages/ProjectHomePage.tsx and
                       web/src/projectHome/ProjectHomeHeader.tsx
 scripts/install.sh    install or uninstall into an Omnigent checkout
 scripts/verify.sh     run the graph's tests, type-check and lint in that checkout
+scripts/lib/overlay_state.sh   record-and-restore install engine (shared with omnigent-stack)
+tests/drift-test.sh   install/uninstall drift tests against a throwaway upstream worktree
 COMPATIBILITY.md      Omnigent commits this has been tested against
 ```
 
@@ -61,12 +63,26 @@ scripts/install.sh /path/to/omnigent --check   # dry run; non-zero exit on confl
 scripts/install.sh /path/to/omnigent           # install (re-running is a no-op)
 ```
 
-`install.sh` copies `src/projectGraph` into `web/src/projectGraph`, then
-applies `integration.patch` with `git apply`, falling back to a 3-way merge
-when upstream context has drifted. It refuses a checkout with local changes
-outside the paths it manages (`install.sh --list-paths`) unless `--force` is
-given, and it refuses to overwrite a `web/src/projectGraph` that upstream
-tracks.
+`install.sh` copies `src/projectGraph` into `web/src/projectGraph` and applies
+`integration.patch`, using a 3-way merge when upstream context has drifted.
+
+- **Computed first, then written.** The whole result, merge included, is
+  computed in a disposable scratch area (a temporary index and work dir). A
+  conflict, or conflict markers in the result, aborts before anything in the
+  checkout changes. `--check` runs exactly this and stops.
+- **Recorded.** Before writing, it records each touched file's pre-install
+  content and pre/post hashes, plus the list of installed files, under
+  `$(git rev-parse --absolute-git-dir)/omnigent-stack/project-graph/`. That
+  directory is per worktree and outside the tracked tree. The checkout's index
+  is never modified.
+- **Idempotent.** If the record exists and every file still matches it,
+  re-running reports `already installed`.
+- **Refusals.** It refuses, changing nothing, when:
+  - `web/src/projectGraph` already has files it did not install (unless
+    `--force`);
+  - the checkout has local changes outside the paths it manages
+    (`--list-paths`) (unless `--force`);
+  - upstream tracks `web/src/projectGraph`.
 
 Rebuild the web app as you normally do (`cd web && pnpm build`, or restart
 your dev server) to pick up the view.
@@ -74,8 +90,15 @@ your dev server) to pick up the view.
 To remove it:
 
 ```bash
-scripts/install.sh /path/to/omnigent --uninstall
+scripts/install.sh /path/to/omnigent --uninstall [--check]
 ```
+
+Uninstall restores the recorded pre-install content exactly, so a 3-way-merged
+install comes back byte-for-byte. It first verifies that every installed file
+is unchanged and that `web/src/projectGraph` has no files it did not install.
+If not, it lists them and refuses without changing anything. With `--force`
+it restores anyway, prints a warning naming every overwritten file, and still
+never deletes files it did not install.
 
 ## Verify
 
@@ -88,6 +111,22 @@ It confirms the installed source matches this repo, runs
 `pnpm install --frozen-lockfile` (skip with `--no-install`), then
 `pnpm exec vitest run src/projectGraph src/projectHome src/pages/ProjectHomePage`,
 `pnpm type-check` and `pnpm lint` in the checkout's `web/`.
+
+### Drift tests
+
+```bash
+tests/drift-test.sh /path/to/omnigent-clone [origin/main]
+```
+
+This creates a throwaway `git worktree` of the given ref and exercises:
+
+- a clean round trip;
+- staged context drift that merges 3-way, restored exactly by hash;
+- conflicting drift, which is refused with the checkout unchanged;
+- a foreign file in `web/src/projectGraph`;
+- a refused uninstall, which leaves the checkout untouched.
+
+It removes the worktree afterwards.
 
 ## Compatibility
 

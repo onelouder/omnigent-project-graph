@@ -4,11 +4,15 @@
 # usage: install.sh <omnigent-dir> [--uninstall] [--check] [--force] [--no-dirty-check] [--list-paths]
 #
 #   (default)     copy src/projectGraph into web/src/projectGraph and apply
-#                 integration.patch (3-way fallback). Re-running is a no-op.
-#   --uninstall   reverse the patch and remove web/src/projectGraph.
-#   --check       dry run: report what would happen; non-zero exit on conflict.
-#   --force       proceed even if the checkout has unrelated local changes,
-#                 and on --uninstall remove a locally edited web/src/projectGraph.
+#                 integration.patch (3-way merge when upstream context drifted).
+#                 Records the pre-install content; re-running is a no-op.
+#   --uninstall   restore the recorded pre-install content and remove the
+#                 installed files.
+#   --check       dry run of install (or of --uninstall); changes nothing and
+#                 exits non-zero on a conflict or refusal.
+#   --force       install over existing files in web/src/projectGraph, ignore
+#                 unrelated local changes, and uninstall even when installed
+#                 files were edited (their edits are overwritten, with a warning).
 #   --no-dirty-check  skip the unrelated-changes check (for callers that ran their own).
 #   --list-paths  print the checkout paths this overlay manages, then exit.
 set -euo pipefail
@@ -16,24 +20,22 @@ set -euo pipefail
 FEATURE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="$FEATURE_ROOT/src/projectGraph"
 PATCH_FILE="$FEATURE_ROOT/integration.patch"
+UNIT=project-graph
 TARGET_REL="web/src/projectGraph"
 INTEGRATION_FILES=(web/src/pages/ProjectHomePage.tsx web/src/projectHome/ProjectHomeHeader.tsx)
+OV_LOG_PREFIX=project-graph
+# shellcheck source=lib/overlay_state.sh
+source "$FEATURE_ROOT/scripts/lib/overlay_state.sh"
 
-die() { echo "project-graph: error: $*" >&2; exit 1; }
-say() { echo "project-graph: $*"; }
+die() { ov_err "$*"; exit 1; }
+usage() { sed -n '4,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+list_paths() { echo "$TARGET_REL/"; printf '%s\n' "${INTEGRATION_FILES[@]}"; }
 
-usage() { sed -n '4,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
-
-list_paths() {
-  echo "$TARGET_REL/"
-  printf '%s\n' "${INTEGRATION_FILES[@]}"
-}
-
-mode=install force=0 dirty_check=1 omnigent_dir=""
+uninstall=0 dry_run=0 force=0 dirty_check=1 omnigent_dir=""
 for arg in "$@"; do
   case "$arg" in
-    --uninstall) mode=uninstall ;;
-    --check) mode=check ;;
+    --uninstall) uninstall=1 ;;
+    --check) dry_run=1 ;;
     --force) force=1 ;;
     --no-dirty-check) dirty_check=0 ;;
     --list-paths) list_paths; exit 0 ;;
@@ -49,105 +51,37 @@ omnigent_dir="$(cd "$omnigent_dir" && pwd)"
 git -C "$omnigent_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git checkout: $omnigent_dir"
 [[ "$(git -C "$omnigent_dir" rev-parse --show-toplevel)" == "$omnigent_dir" ]] \
   || die "give the checkout's top-level directory, not a subdirectory: $omnigent_dir"
-for file in "${INTEGRATION_FILES[@]}" web/package.json; do
-  [[ -f "$omnigent_dir/$file" ]] || die "$omnigent_dir does not look like an Omnigent checkout (missing $file)"
-done
-target="$omnigent_dir/$TARGET_REL"
-in_checkout() { git -C "$omnigent_dir" "$@"; }
+[[ -f "$omnigent_dir/web/package.json" ]] || die "$omnigent_dir does not look like an Omnigent checkout (no web/package.json)"
+ov_init "$omnigent_dir"
 
-# Upstream owning web/src/projectGraph would collide with this overlay.
-if [[ -n "$(in_checkout ls-files -- "$TARGET_REL")" ]]; then
+if [[ -n "$(git -C "$omnigent_dir" ls-files -- "$TARGET_REL")" ]]; then
   die "$TARGET_REL is tracked by this Omnigent checkout; the overlay would overwrite upstream files"
 fi
 
-# Changes outside the paths this overlay manages make the checkout dirty.
+# Local changes outside the paths this overlay manages.
 unrelated_changes() {
-  local managed=() path
+  local managed=() line path prefix owned
   mapfile -t managed < <(list_paths)
-  in_checkout status --porcelain=v1 --untracked-files=all | while IFS= read -r line; do
-    path="${line:3}"; path="${path##* -> }"
-    local owned=0 prefix
+  while IFS= read -r line; do
+    path="${line:3}"; path="${path##* -> }"; owned=0
     for prefix in "${managed[@]}"; do
       if [[ "$prefix" == */ ]]; then [[ "$path" == "$prefix"* ]] && owned=1
       else [[ "$path" == "$prefix" ]] && owned=1; fi
     done
-    (( owned )) || echo "$line"
-  done
+    ((owned)) || echo "$line"
+  done < <(git -C "$omnigent_dir" status --porcelain=v1 --untracked-files=all)
 }
-if [[ "$mode" != check ]] && (( dirty_check )); then
+if ((!dry_run && dirty_check)); then
   dirt="$(unrelated_changes)"
   if [[ -n "$dirt" ]]; then
-    if (( force )); then say "warning: checkout has unrelated changes; continuing (--force)"
-    else die "checkout has local changes outside the overlay's paths (use --force to proceed):"$'\n'"$dirt"; fi
+    ((force)) || die "checkout has local changes outside the overlay's paths (use --force to proceed):"$'\n'"$dirt"
+    ov_warn "checkout has unrelated local changes; continuing (--force)"
   fi
 fi
 
-# Source copy state: absent | installed | different.
-source_state() {
-  if [[ ! -e "$target" ]]; then echo absent
-  elif diff -rq "$SOURCE_DIR" "$target" >/dev/null 2>&1; then echo installed
-  else echo different; fi
-}
-
-# Integration patch state: unapplied | applied | unapplied-3way | conflict.
-patch_state() {
-  if in_checkout apply --check "$PATCH_FILE" 2>/dev/null; then echo unapplied
-  elif in_checkout apply --check -R "$PATCH_FILE" 2>/dev/null; then echo applied
-  elif in_checkout apply --check --3way "$PATCH_FILE" >/dev/null 2>&1; then echo unapplied-3way
-  else echo conflict; fi
-}
-
-apply_patch() {  # $@: extra git-apply flags (e.g. -R)
-  if in_checkout apply "$@" "$PATCH_FILE" 2>/dev/null; then return 0; fi
-  say "plain git apply $* failed; trying a 3-way merge"
-  if ! in_checkout apply --3way "$@" "$PATCH_FILE"; then
-    die "integration.patch does not apply to $omnigent_dir; resolve the conflict markers in: ${INTEGRATION_FILES[*]}"
-  fi
-  # --3way stages its result; keep the index matching HEAD so the change stays a plain edit.
-  in_checkout reset -q -- "${INTEGRATION_FILES[@]}"
-  say "applied with a 3-way merge; review the integration files"
-}
-
-src_state="$(source_state)" ptc_state="$(patch_state)"
-
-case "$mode" in
-  check)
-    say "checkout:          $omnigent_dir ($(in_checkout rev-parse --short HEAD))"
-    say "source copy:       $src_state"
-    say "integration.patch: $ptc_state"
-    [[ "$ptc_state" != conflict ]] || die "integration.patch conflicts with this checkout"
-    if [[ "$src_state" == different ]]; then say "note: $TARGET_REL differs from this overlay's source and would be replaced"; fi
-    say "check passed"
-    ;;
-  install)
-    case "$src_state" in
-      installed) say "source already installed at $TARGET_REL" ;;
-      *)
-        [[ "$src_state" == different ]] && say "replacing the existing $TARGET_REL with this overlay's source"
-        rm -rf "$target"
-        cp -R "$SOURCE_DIR" "$target"
-        say "copied source to $TARGET_REL" ;;
-    esac
-    case "$ptc_state" in
-      applied) say "integration.patch already applied" ;;
-      conflict) die "integration.patch conflicts with $omnigent_dir; see COMPATIBILITY.md" ;;
-      *) apply_patch; say "applied integration.patch" ;;
-    esac
-    say "installed"
-    ;;
-  uninstall)
-    case "$ptc_state" in
-      applied) apply_patch -R; say "reversed integration.patch" ;;
-      unapplied|unapplied-3way) say "integration.patch not applied; nothing to reverse" ;;
-      conflict) die "cannot reverse integration.patch: the integration files changed since install" ;;
-    esac
-    case "$src_state" in
-      absent) say "$TARGET_REL not present" ;;
-      installed) rm -rf "$target"; say "removed $TARGET_REL" ;;
-      different)
-        (( force )) || die "$TARGET_REL has local edits; re-run with --force to remove it anyway"
-        rm -rf "$target"; say "removed $TARGET_REL (had local edits; --force)" ;;
-    esac
-    say "uninstalled"
-    ;;
-esac
+ov_say "checkout $omnigent_dir ($(git -C "$omnigent_dir" rev-parse --short HEAD))"
+if ((uninstall)); then
+  ov_uninstall "$UNIT" "$TARGET_REL" "$dry_run" "$force"
+else
+  ov_install "$UNIT" "$PATCH_FILE" "$SOURCE_DIR" "$TARGET_REL" "$dry_run" "$force"
+fi

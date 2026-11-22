@@ -8,7 +8,7 @@ suite, `pnpm type-check`, `pnpm lint` and `pnpm build`.
 | Omnigent commit | Date       | install.sh            | verify.sh --build                         |
 | --------------- | ---------- | --------------------- | ----------------------------------------- |
 | `2f5296a8b`     | 2026-11    | development base      | verified during development               |
-| `31874a169`     | 2026-11-22 | clean `git apply`     | 124 tests passed (12 files); all green    |
+| `31874a169`     | 2026-11-22 | plain apply; `tests/drift-test.sh` passes | 124 tests passed (12 files); all green |
 
 The integration patch touches only:
 
