@@ -27,13 +27,34 @@ endpoints and theme tokens.
   each mirrored elicitation. Nothing is auto-approved.
 - Stop and cancel: "Cancel turn", "Stop session", "Stop subtree" and a
   multi-select "Stop selected" bar, each confirmed first.
-- Overlays (Cost · Context): per-branch inclusive cost and a context-window
+- Overlays (Cost · Context · Memory): per-branch inclusive cost and a context-window
   gauge on each card, with a hover breakdown by model. Toggled from the
   toolbar and saved per project.
 - Send and steer: with one session selected, a docked composer sends a
   message (or steers a working session).
 - Controls are hidden when the viewer lacks edit permission. Keyboard: `a`
   approves on the focused card, `.` cancels its turn.
+
+**Phase 3: project memory**
+
+- Project Memory panel: the **Memory** button in the toolbar lists what
+  agents remember about the project, with search, add, edit and delete. It
+  reads Omnigent's built-in long-term memory under `/projects/<repo>/`
+  through the server's existing `/v1/memory` routes.
+- When memory is off on the server (Omnigent's default), the panel says so
+  and shows how to turn it on (`OMNIGENT_FEATURES=memory`); nothing else in
+  the graph changes.
+- Memory providers: the panel talks to memory through one small interface.
+  Omnigent memory is the default; another memory system plugs in without
+  editing this overlay.
+- Memory overlay (optional, best-effort): once agents are asked to tag the
+  memories they write with their session id, each card shows how many
+  project memories its session wrote, and the branches that wrote to memory
+  are highlighted.
+
+Setup, the tagging instruction, troubleshooting and limits are in
+[docs/project-memory.md](docs/project-memory.md). Adding another memory
+system is in [docs/memory-providers.md](docs/memory-providers.md).
 
 ### Feature gate
 
@@ -52,6 +73,8 @@ scripts/verify.sh     run the graph's tests, type-check and lint in that checkou
 scripts/lib/overlay_state.sh   record-and-restore install engine (shared with omnigent-stack)
 tests/drift-test.sh   install/uninstall drift tests against a throwaway upstream worktree
 COMPATIBILITY.md      Omnigent commits this has been tested against
+docs/project-memory.md     set up and use the Project Memory panel
+docs/memory-providers.md   how to plug in another memory system
 ```
 
 ## Install
@@ -183,6 +206,8 @@ upgrade.
   limit, so very deep trees show only their first levels.
 - Cost totals are inclusive per branch and may be estimates, as reported by
   Omnigent.
+- Project memory has its own limits (search, edits, tagging); see
+  [docs/project-memory.md](docs/project-memory.md#limits).
 
 ## License
 

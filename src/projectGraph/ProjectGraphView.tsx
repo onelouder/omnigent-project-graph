@@ -88,6 +88,9 @@ import {
   type SessionCardNode,
   type StandaloneLabelNode,
 } from "./projectGraphTypes";
+import { memoryBranchIds, memoryCountsBySession, normalizeSessionId } from "./memory/memoryLogic";
+import { ProjectGraphMemory, useMemoryProject } from "./memory/ProjectGraphMemory";
+import { useMemoryIndex, useMemoryProvider, useMemoryStatus } from "./memory/useProjectMemory";
 import { useProjectGraphChildren, useProjectGraphRows } from "./useProjectGraphData";
 import { useProjectGraphContext, useProjectGraphCosts } from "./useProjectGraphOverlays";
 import { useProjectGraphViewState } from "./useProjectGraphViewState";
@@ -233,6 +236,7 @@ function ProjectGraphCanvas({
   const [matchIndex, setMatchIndex] = useState(0);
   const [animating, setAnimating] = useState(false);
   const [approvalsId, setApprovalsId] = useState<string | null>(null);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   // Where the view last settled, so overlays read only on-screen cards.
   const [shownViewport, setShownViewport] = useState<Viewport | null>(null);
   const controls = useProjectGraphControls();
@@ -480,6 +484,7 @@ function ProjectGraphCanvas({
   );
   const openApprovals = useCallback((id: string) => {
     setKeyboardFocusId(id);
+    setMemoryOpen(false);
     setApprovalsId(id);
   }, []);
   const stepAwaiting = (step: 1 | -1) => {
@@ -689,6 +694,51 @@ function ProjectGraphCanvas({
   );
   const contexts = useProjectGraphContext(contextRows, overlays.context);
   const costTotal = overlays.cost ? totalCost(forest, overlayIds, costs) : null;
+  // --- Project memory ---
+  // Session tags are best-effort: only memories an agent tagged with its session id count.
+  const { provider: memoryProvider } = useMemoryProvider();
+  const memoryOverlayOn = overlays.memory && memoryProvider.sessionTags;
+  const memoryStatus = useMemoryStatus(memoryProvider, memoryOverlayOn);
+  const memoryReady = memoryOverlayOn && memoryStatus.data?.state === "ready";
+  const workspaces = useMemo(
+    () => [...forest.nodesById.values()].map((row) => row.workspace),
+    [forest],
+  );
+  const { project: memoryProject } = useMemoryProject(
+    memoryProvider,
+    viewerId,
+    projectName,
+    workspaces,
+    memoryReady,
+  );
+  const memoryIndex = useMemoryIndex(memoryProvider, memoryProject, memoryReady);
+  /** Graph session ids by the bare form a tag carries. */
+  const sessionByTag = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const id of forest.nodesById.keys()) map.set(normalizeSessionId(id), id);
+    return map;
+  }, [forest]);
+  const memoryEntries = memoryReady ? memoryIndex.data?.entries : undefined;
+  const memoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!memoryEntries) return counts;
+    for (const [tag, count] of memoryCountsBySession(memoryEntries)) {
+      const id = sessionByTag.get(tag);
+      if (id !== undefined) counts.set(id, count);
+    }
+    return counts;
+  }, [memoryEntries, sessionByTag]);
+  const memoryBranch = useMemo(
+    () => memoryBranchIds(memoryCounts.keys(), (id) => forest.parentById.get(id)?.id ?? null),
+    [memoryCounts, forest],
+  );
+  const memorySessionTitle = useCallback(
+    (tag: string) => {
+      const row = forest.nodesById.get(sessionByTag.get(normalizeSessionId(tag)) ?? "");
+      return row ? conversationDisplayLabel(row) : null;
+    },
+    [forest, sessionByTag],
+  );
   const subtreeStopCounts = useMemo(() => {
     const result = new Map<string, number>();
     for (const id of forest.nodesById.keys()) {
@@ -756,6 +806,8 @@ function ProjectGraphCanvas({
           showCost: overlays.cost,
           cost: overlays.cost ? cardCost(forest, id, costs) : null,
           context: overlays.context ? (contexts.get(id) ?? null) : null,
+          memoryCount: memoryCounts.get(id) ?? null,
+          memoryBranch: memoryBranch.has(id),
         };
         return { ...node, data };
       }),
@@ -779,6 +831,8 @@ function ProjectGraphCanvas({
       overlays.context,
       costs,
       contexts,
+      memoryCounts,
+      memoryBranch,
       viewerId,
     ],
   );
@@ -813,19 +867,29 @@ function ProjectGraphCanvas({
             edge.type === "tree" && forest.bucketById.get(edge.target) === "Needs attention",
           highlighted:
             edge.type === "tree" && selectedPath.has(edge.source) && selectedPath.has(edge.target),
+          memory:
+            edge.type === "tree" && memoryBranch.has(edge.source) && memoryBranch.has(edge.target),
           dimmed:
             highlighted !== null &&
             !highlighted.has(edge.target) &&
             !highlightAncestors.has(edge.target),
         },
       })),
-    [elements.edges, forest.bucketById, selectedPath, highlighted, highlightAncestors],
+    [
+      elements.edges,
+      forest.bucketById,
+      selectedPath,
+      memoryBranch,
+      highlighted,
+      highlightAncestors,
+    ],
   );
 
   // --- Keyboard ---
   /** One Escape step: search, then the status filter and selection, then focus. */
   const escapeStep = (): boolean => {
     if (approvalsId !== null) setApprovalsId(null);
+    else if (memoryOpen) setMemoryOpen(false);
     else if (searchActive) setSearchQuery("");
     else if (filterActive) setStatusFilter(new Set());
     else if (multiSelected.size > 0) setMultiSelected(new Set());
@@ -1013,6 +1077,7 @@ function ProjectGraphCanvas({
   const needsAttention = counts.get("Needs attention") ?? 0;
   const working = counts.get("Working") ?? 0;
   const approvalRow = approvalsId ? (forest.nodesById.get(approvalsId) ?? null) : null;
+  const memoryShown = memoryOpen && approvalRow === null;
   // The composer docks only while exactly one session is selected, and never for several.
   const singleSelectedId =
     multiSelected.size === 1
@@ -1077,6 +1142,12 @@ function ProjectGraphCanvas({
             onNextAwaiting={() => stepAwaiting(1)}
             overlays={overlays}
             onOverlays={(next) => persist((previous) => ({ ...previous, overlays: next }))}
+            memoryOpen={memoryShown}
+            onToggleMemory={() => {
+              // One drawer at a time: the panel takes the approvals drawer's place.
+              setApprovalsId(null);
+              setMemoryOpen(!memoryShown);
+            }}
           />
           <div
             ref={canvasRef}
@@ -1156,6 +1227,7 @@ function ProjectGraphCanvas({
                   ? `${costTotal.estimated ? "~" : ""}${formatSessionCostUsd(costTotal.costUsd)} shown`
                   : null
               }
+              memoryLegend={memoryBranch.size > 0}
             />
             {searchActive && matchList.length === 0 && (
               <ProjectGraphNoMatch query={searchQuery.trim()} onClear={() => setSearchQuery("")} />
@@ -1168,6 +1240,19 @@ function ProjectGraphCanvas({
                 onStep={stepAwaiting}
                 onOpenSession={() => openSession(approvalRow.id, "full")}
                 onClose={() => setApprovalsId(null)}
+              />
+            )}
+            {memoryShown && (
+              <ProjectGraphMemory
+                projectName={projectName}
+                viewerId={viewerId}
+                workspaces={workspaces}
+                sessionTitle={memorySessionTitle}
+                onJumpToSession={(tag) => {
+                  const id = sessionByTag.get(normalizeSessionId(tag));
+                  if (id !== undefined) jumpToSession(id);
+                }}
+                onClose={() => setMemoryOpen(false)}
               />
             )}
             {composerRow && (

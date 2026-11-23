@@ -60,12 +60,15 @@ function TreeEdgeComponent({
     ? "stroke-[var(--foreground)] [stroke-width:2px]"
     : data?.attention
       ? "stroke-[var(--warning)] [stroke-width:2px]"
-      : "stroke-[var(--border-strong)] [stroke-width:1.5px]";
+      : data?.memory
+        ? "stroke-[var(--brand-accent)] [stroke-width:2px]"
+        : "stroke-[var(--border-strong)] [stroke-width:1.5px]";
   return (
     <g
       className={cn("transition-opacity duration-150", data?.dimmed && "opacity-25")}
       data-edge-kind={data?.kind}
       data-attention={data?.attention ? "" : undefined}
+      data-memory={data?.memory ? "" : undefined}
     >
       <path
         d={path}

@@ -4,6 +4,7 @@
 import { Fragment } from "react";
 import {
   ArchiveIcon,
+  BrainIcon,
   CheckCheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -37,6 +38,7 @@ import { cn } from "@/lib/utils";
 import type { StatusBucket } from "@/shell/sidebarNav";
 import { PROJECT_GRAPH_LAYOUTS, type ProjectGraphLayoutMode } from "./projectGraphLayout";
 import { GRAPH_STATUS_CHIPS } from "./projectGraphStatus";
+import { SESSION_TAG_NOTE } from "./memory/memoryLogic";
 import type { ProjectGraphOverlays } from "./projectGraphStorage";
 
 const LAYOUT_LABEL: Record<ProjectGraphLayoutMode, string> = {
@@ -87,6 +89,8 @@ export function ProjectGraphToolbar({
   onNextAwaiting,
   overlays,
   onOverlays,
+  memoryOpen,
+  onToggleMemory,
 }: {
   counts: ReadonlyMap<StatusBucket, number>;
   statusFilter: ReadonlySet<StatusBucket>;
@@ -107,6 +111,8 @@ export function ProjectGraphToolbar({
   onNextAwaiting: () => void;
   overlays: ProjectGraphOverlays;
   onOverlays: (overlays: ProjectGraphOverlays) => void;
+  memoryOpen: boolean;
+  onToggleMemory: () => void;
 }) {
   return (
     <div
@@ -191,6 +197,19 @@ export function ProjectGraphToolbar({
           </Button>
         </span>
       )}
+      <Button
+        variant="ghost"
+        size="xs"
+        aria-label="Project memory"
+        aria-pressed={memoryOpen}
+        data-testid="project-graph-memory-toggle"
+        title="What agents remember about this project"
+        className={cn("text-muted-foreground", memoryOpen && "bg-muted text-foreground")}
+        onClick={onToggleMemory}
+      >
+        <BrainIcon />
+        Memory
+      </Button>
       <OverlaysToggle overlays={overlays} onOverlays={onOverlays} />
       <div
         role="radiogroup"
@@ -237,9 +256,10 @@ function OverlaysToggle({
   overlays: ProjectGraphOverlays;
   onOverlays: (overlays: ProjectGraphOverlays) => void;
 }) {
-  const options: [keyof ProjectGraphOverlays, string][] = [
+  const options: [keyof ProjectGraphOverlays, string, string?][] = [
     ["cost", "Cost"],
     ["context", "Context"],
+    ["memory", "Memory", `Project memories each session wrote. ${SESSION_TAG_NOTE}`],
   ];
   return (
     <div
@@ -249,10 +269,11 @@ function OverlaysToggle({
     >
       <LayersIcon aria-hidden className="size-3.5 text-muted-foreground" />
       <span className="pr-0.5 text-muted-foreground">Overlays:</span>
-      {options.map(([key, label]) => (
+      {options.map(([key, label, title]) => (
         <button
           key={key}
           type="button"
+          title={title}
           aria-pressed={overlays[key]}
           onClick={() => onOverlays({ ...overlays, [key]: !overlays[key] })}
           className={cn(
@@ -424,12 +445,15 @@ export function ProjectGraphFooter({
   needsAttention,
   working,
   costLabel,
+  memoryLegend,
 }: {
   total: number;
   needsAttention: number;
   working: number;
   /** The shown trees' spend, each counted once; null when off or unknown. */
   costLabel: string | null;
+  /** The Memory overlay marks at least one branch. */
+  memoryLegend: boolean;
 }) {
   const line = "h-0 w-5 border-t-[1.5px]";
   return (
@@ -464,6 +488,12 @@ export function ProjectGraphFooter({
           <span aria-hidden className={cn(line, "border-t-2 border-warning")} />
           Needs you
         </li>
+        {memoryLegend && (
+          <li className="flex items-center gap-1.5" title={SESSION_TAG_NOTE}>
+            <span aria-hidden className={cn(line, "border-t-2 border-brand-accent")} />
+            Wrote to memory
+          </li>
+        )}
       </ul>
     </div>
   );
