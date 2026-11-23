@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Phase 3: Project Memory panel, memory provider interface and session-tag
+  overlay.
 - `install.sh` checks for bash 4.4+ and GNU coreutils before doing anything,
   and says what is missing.
 - CI: install, verify, uninstall and drift tests against the verified Omnigent

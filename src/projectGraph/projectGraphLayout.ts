@@ -624,6 +624,8 @@ export interface ProjectGraphEdgeData extends Record<string, unknown> {
   attention?: boolean;
   /** On the selected card's path to its root. */
   highlighted?: boolean;
+  /** On a branch that wrote to project memory (Memory overlay, best-effort). */
+  memory?: boolean;
   /** Dimmed by search or a status filter. */
   dimmed?: boolean;
   /** Bends for an edge into a wrapped fan-out; a plain curve without them. */
