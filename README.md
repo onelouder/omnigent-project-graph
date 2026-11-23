@@ -7,6 +7,8 @@ directory plus a two-file hook into the project home page. It adds no
 dependencies and no backend changes; it reuses Omnigent's existing hooks,
 endpoints and theme tokens.
 
+![The graph in the tree layout: a root session with nine sub-agents, hover details on the selected card, the composer docked below and the session open in the quick view](docs/graph-tree.png)
+
 ## Features
 
 **Phase 1: the graph**
@@ -56,6 +58,8 @@ Setup, the tagging instruction, troubleshooting and limits are in
 [docs/project-memory.md](docs/project-memory.md). Adding another memory
 system is in [docs/memory-providers.md](docs/memory-providers.md).
 
+![A forked session joined to its source by a dashed edge, the card menu open, and the cost and context overlays on](docs/graph-fork-menu.png)
+
 ### Feature gate
 
 - Per deployment: build with `VITE_OMNIGENT_PROJECT_GRAPH=0` (or `false`) to
@@ -72,19 +76,44 @@ scripts/install.sh    install or uninstall into an Omnigent checkout
 scripts/verify.sh     run the graph's tests, type-check and lint in that checkout
 scripts/lib/overlay_state.sh   record-and-restore install engine (shared with omnigent-stack)
 tests/drift-test.sh   install/uninstall drift tests against a throwaway upstream worktree
+docs/*.png            screenshots used in this README
 COMPATIBILITY.md      Omnigent commits this has been tested against
+.github/workflows/    CI: install, verify, uninstall and drift tests on each push and weekly
 docs/project-memory.md     set up and use the Project Memory panel
 docs/memory-providers.md   how to plug in another memory system
 ```
 
+## Requirements
+
+- Linux, or WSL on Windows. macOS works with Homebrew `bash` and `coreutils`
+  (GNU tools first on `PATH`); the stock bash 3.2 and BSD tools do not.
+  `install.sh` checks this first and says what is missing.
+- bash 4.4+, git, and GNU coreutils (`realpath`, `sha256sum`, `head`).
+- An Omnigent git checkout at a commit listed in
+  [COMPATIBILITY.md](COMPATIBILITY.md). Use a checkout or worktree that is
+  not serving a running Omnigent.
+- For `verify.sh` and the build: Node 22 and the pnpm version named in
+  Omnigent's `package.json` (`packageManager`).
+- The drift tests also need GNU `sed`, `ls` and `xargs`.
+
 ## Install
 
 ```bash
+git clone https://github.com/omnigent-ai/omnigent.git      # skip if you have a checkout
+git -C omnigent checkout 31874a169558575396f7e86b511d9eccd39a1d5c   # newest verified commit
+
 git clone https://github.com/onelouder/omnigent-project-graph.git
 cd omnigent-project-graph
-scripts/install.sh /path/to/omnigent --check   # dry run; non-zero exit on conflict
-scripts/install.sh /path/to/omnigent           # install (re-running is a no-op)
+scripts/install.sh ../omnigent --check   # dry run; non-zero exit on conflict
+scripts/install.sh ../omnigent           # install (re-running is a no-op)
+scripts/verify.sh  ../omnigent --build   # tests, type-check, lint, build
 ```
+
+On a newer Omnigent commit the same steps apply; `--check` and `verify.sh`
+tell you whether it still fits. To carry this alongside other overlays and
+core patches, pin it in an
+[omnigent-stack](https://github.com/onelouder/omnigent-stack) `stack.yaml`
+instead of installing it by hand.
 
 `install.sh` copies `src/projectGraph` into `web/src/projectGraph` and applies
 `integration.patch`, using a 3-way merge when upstream context has drifted.
@@ -208,6 +237,12 @@ upgrade.
   Omnigent.
 - Project memory has its own limits (search, edits, tagging); see
   [docs/project-memory.md](docs/project-memory.md#limits).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop and
+[SECURITY.md](SECURITY.md) for reporting vulnerabilities. Changes are listed
+in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

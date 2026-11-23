@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays: catch upstream Omnigent changes that break the overlay.
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The newest Omnigent commit in COMPATIBILITY.md. Update both together.
+  OMNIGENT_VERIFIED: 31874a169558575396f7e86b511d9eccd39a1d5c
+
+jobs:
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Syntax
+        run: for f in scripts/*.sh scripts/lib/*.sh tests/*.sh; do bash -n "$f"; done
+      - name: shellcheck
+        # SC2034/SC2120: variables and arguments used through `eval` in the test helpers.
+        run: shellcheck --severity=warning -e SC2034,SC2120 scripts/*.sh scripts/lib/*.sh tests/*.sh
+
+  overlay:
+    name: Install and verify (Omnigent ${{ matrix.omnigent }})
+    runs-on: ubuntu-latest
+    # Upstream main is informational: it shows a break coming, it does not block a PR.
+    continue-on-error: ${{ matrix.omnigent == 'main' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        omnigent: [verified, main]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: project-graph
+
+      - name: Check out Omnigent
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: omnigent-ai/omnigent
+          ref: ${{ matrix.omnigent == 'verified' && env.OMNIGENT_VERIFIED || 'main' }}
+          path: omnigent
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: omnigent/package.json
+
+      - name: Dry run
+        run: project-graph/scripts/install.sh omnigent --check
+
+      - name: Install
+        run: project-graph/scripts/install.sh omnigent
+
+      - name: Verify (tests, type-check, lint, build)
+        run: project-graph/scripts/verify.sh omnigent --build
+
+      - name: Uninstall leaves the checkout clean
+        run: |
+          project-graph/scripts/install.sh omnigent --uninstall
+          test -z "$(git -C omnigent status --porcelain)"
+
+      - name: Drift tests
+        run: project-graph/tests/drift-test.sh omnigent HEAD

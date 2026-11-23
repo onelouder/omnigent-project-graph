@@ -11,6 +11,10 @@ suite, `pnpm type-check`, `pnpm lint` and `pnpm build`.
 | `31874a169`     | 2026-11-22 | plain apply; `tests/drift-test.sh` passes | 124 tests passed (12 files); all green |
 | `d09ca3367`     | 2026-11-22 | plain apply           | 174 tests passed (16 files); all green; with project memory |
 
+`d09ca3367` is `31874a169` plus five local commits and is not in upstream
+Omnigent; `31874a169` is the newest upstream commit verified, and the one CI
+installs into.
+
 The integration patch touches only:
 
 - `web/src/pages/ProjectHomePage.tsx`: one import, one hook call, and the

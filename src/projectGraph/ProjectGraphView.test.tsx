@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -261,6 +261,13 @@ function graphTree({
 beforeEach(() => {
   viewer.id = null;
   saved.clear();
+  // Where jsdom does have localStorage (Node 22), a choice one test stores
+  // there, such as the memory project, must not reach the next test.
+  try {
+    window.localStorage.clear();
+  } catch {
+    // No usable localStorage in this environment.
+  }
   vi.clearAllMocks();
   useProjectBoardSearchStore.getState().setQuery("");
   graphData.rows = [
@@ -1202,19 +1209,21 @@ describe("ProjectGraphView project memory", () => {
     renderGraph();
     expect(screen.queryByTestId("project-graph-memory-count")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Memory" }));
-    await settle();
-    await settle();
-    const counts = screen
-      .getAllByTestId("project-graph-node")
-      .map((node) => [
-        node.dataset.sessionId,
-        within(node).queryByTestId("project-graph-memory-count")?.textContent ?? null,
+    // The counts arrive after the memory list loads; a fixed number of frames
+    // is not enough on a slow machine.
+    await waitFor(() => {
+      const counts = screen
+        .getAllByTestId("project-graph-node")
+        .map((node) => [
+          node.dataset.sessionId,
+          within(node).queryByTestId("project-graph-memory-count")?.textContent ?? null,
+        ]);
+      expect(counts).toEqual([
+        ["conv_alpha", expect.stringMatching(/^1/)],
+        ["conv_beta", expect.stringMatching(/^1/)],
+        ["conv_gamma", null],
       ]);
-    expect(counts).toEqual([
-      ["conv_alpha", expect.stringMatching(/^1/)],
-      ["conv_beta", expect.stringMatching(/^1/)],
-      ["conv_gamma", null],
-    ]);
+    });
     expect(saved.get(projectGraphStorageKey(null, "demo"))).toMatchObject({
       overlays: { cost: false, context: false, memory: true },
     });
