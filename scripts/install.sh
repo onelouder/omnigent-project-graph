@@ -24,6 +24,33 @@ UNIT=project-graph
 TARGET_REL="web/src/projectGraph"
 INTEGRATION_FILES=(web/src/pages/ProjectHomePage.tsx web/src/projectHome/ProjectHomeHeader.tsx)
 OV_LOG_PREFIX=project-graph
+
+# Fail early, with one clear message, on a host the scripts cannot run on
+# (stock macOS: bash 3.2 and BSD userland). See "Requirements" in README.md.
+preflight() {
+  local missing=() tool
+  if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+    missing+=("bash 4.4 or newer (this is $BASH_VERSION)")
+  fi
+  for tool in git sha256sum realpath mktemp find sort cp; do
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if command -v realpath >/dev/null 2>&1 && ! realpath -m -- /nonexistent/path >/dev/null 2>&1; then
+    missing+=("GNU realpath (this one has no -m)")
+  fi
+  if ! printf 'a\nb\n' | head -n -1 >/dev/null 2>&1; then
+    missing+=("GNU head (this one has no 'head -n -1')")
+  fi
+  ((${#missing[@]} == 0)) && return 0
+  {
+    echo "project-graph: error: this host is missing what the installer needs:"
+    printf '  - %s\n' "${missing[@]}"
+    echo "On macOS: brew install bash coreutils, put \$(brew --prefix)/opt/coreutils/libexec/gnubin"
+    echo "first on PATH, and run the script with the Homebrew bash. Nothing was changed."
+  } >&2
+  exit 1
+}
+preflight
 # shellcheck source=lib/overlay_state.sh
 source "$FEATURE_ROOT/scripts/lib/overlay_state.sh"
 
