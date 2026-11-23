@@ -261,6 +261,13 @@ function graphTree({
 beforeEach(() => {
   viewer.id = null;
   saved.clear();
+  // Where jsdom does have localStorage (Node 22), a choice one test stores
+  // there, such as the memory project, must not reach the next test.
+  try {
+    window.localStorage.clear();
+  } catch {
+    // No usable localStorage in this environment.
+  }
   vi.clearAllMocks();
   useProjectBoardSearchStore.getState().setQuery("");
   graphData.rows = [
