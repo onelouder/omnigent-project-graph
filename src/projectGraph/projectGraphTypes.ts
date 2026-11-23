@@ -46,6 +46,13 @@ export interface SessionCardData extends ProjectGraphNodeData {
   cost: AgentCost | null;
   /** Context-window use, when the overlay is on and it is known. */
   context: ContextGauge | null;
+  /**
+   * Project memories tagged with this session's id, when the Memory overlay is
+   * on and there are any. Best-effort: agents add the tags themselves.
+   */
+  memoryCount: number | null;
+  /** On a branch that wrote to project memory: a tagged session or one of its ancestors. */
+  memoryBranch: boolean;
 }
 
 export type SessionCardNode = Node<SessionCardData, "session">;

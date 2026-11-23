@@ -15,10 +15,14 @@ export interface ProjectGraphViewport {
   zoom: number;
 }
 
-/** Which card overlays show: inclusive cost and the context-window gauge. */
+/**
+ * Which card overlays show: inclusive cost, the context-window gauge, and the
+ * best-effort count of project memories a session tagged.
+ */
 export interface ProjectGraphOverlays {
   cost: boolean;
   context: boolean;
+  memory: boolean;
 }
 
 export interface ProjectGraphViewState {
@@ -37,7 +41,7 @@ export const DEFAULT_PROJECT_GRAPH_VIEW_STATE: ProjectGraphViewState = {
   layout: "tree",
   viewport: null,
   focusRoot: null,
-  overlays: { cost: false, context: false },
+  overlays: { cost: false, context: false, memory: false },
 };
 
 export function projectGraphStorageKey(viewerId: string | null, projectName: string): string {
@@ -58,8 +62,8 @@ function viewport(value: unknown): ProjectGraphViewport | null {
 
 function overlays(value: unknown): ProjectGraphOverlays {
   if (!value || typeof value !== "object") return DEFAULT_PROJECT_GRAPH_VIEW_STATE.overlays;
-  const { cost, context } = value as Record<string, unknown>;
-  return { cost: cost === true, context: context === true };
+  const { cost, context, memory } = value as Record<string, unknown>;
+  return { cost: cost === true, context: context === true, memory: memory === true };
 }
 
 export function readProjectGraphViewState(

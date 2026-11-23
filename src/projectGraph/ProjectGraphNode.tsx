@@ -5,7 +5,7 @@
 
 import { Fragment, memo, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { MoreHorizontalIcon, SquareIcon } from "lucide-react";
+import { BrainIcon, MoreHorizontalIcon, SquareIcon } from "lucide-react";
 import { RunningDot } from "@/components/RunningDot";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import {
@@ -25,6 +25,7 @@ import {
 } from "@/shell/sidebarNav";
 import { SessionHarnessIcon, SessionUpdatedLabel } from "@/shell/sessionRowMeta";
 import { useProjectGraphActions, useProjectGraphPointerStore } from "./projectGraphContext";
+import { SESSION_TAG_NOTE } from "./memory/memoryLogic";
 import { hasActiveTurn, type ContextGauge, type ContextGaugeTone } from "./projectGraphControls";
 import { cardBox } from "./projectGraphLayout";
 import type { SessionCardData, SessionCardNode, StandaloneLabelNode } from "./projectGraphTypes";
@@ -178,6 +179,23 @@ function CostLabel({ data }: { data: SessionCardData }) {
   );
 }
 
+/** How many project memories this session tagged: a brain icon and the count. */
+function MemoryLabel({ data }: { data: SessionCardData }) {
+  if (data.memoryCount === null) return null;
+  const noun = data.memoryCount === 1 ? "memory" : "memories";
+  return (
+    <span
+      data-testid="project-graph-memory-count"
+      title={`Wrote ${data.memoryCount} project ${noun}. ${SESSION_TAG_NOTE}`}
+      className="flex shrink-0 items-center gap-0.5 text-brand-accent tabular-nums"
+    >
+      <BrainIcon aria-hidden className="size-3" />
+      {data.memoryCount}
+      <span className="sr-only"> project {noun} written</span>
+    </span>
+  );
+}
+
 /** The card's kind, named after the edge into it. */
 function kindLabel(data: SessionCardData): string {
   if (data.treeKind === "subagent") return "Sub-agent";
@@ -258,6 +276,7 @@ function CardBody({ data }: { data: SessionCardData }) {
         <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
           <span className="min-w-0 truncate">{time || harness}</span>
           <CostLabel data={data} />
+          <MemoryLabel data={data} />
           <span className="flex-1" />
           {below && <span className="shrink-0 text-brand-accent">{below}</span>}
         </div>
@@ -306,6 +325,7 @@ function CardBody({ data }: { data: SessionCardData }) {
           )}
         </span>
         <CostLabel data={data} />
+        <MemoryLabel data={data} />
         <span className="flex-1" />
         {below && <span className="shrink-0 font-medium text-brand-accent">{below}</span>}
       </div>

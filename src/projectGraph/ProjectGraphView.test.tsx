@@ -982,3 +982,241 @@ describe("ProjectGraphView controls", () => {
     });
   });
 });
+
+describe("ProjectGraphView project memory", () => {
+  const settle = () => act(nextFrame);
+  interface Stored {
+    content: string;
+    description: string | null;
+  }
+  /** The server's memory, by path; null while the memory feature is off. */
+  let memory: Map<string, Stored> | null = null;
+  const wire = (path: string, entry: Stored, withContent: boolean) => ({
+    path,
+    content: withContent ? entry.content : "",
+    description: entry.description,
+    created_at: 1_795_000_000,
+    updated_at: 1_795_000_000,
+  });
+  const notFound = { status: 404, json: { error: { code: "not_found", message: "Not found" } } };
+
+  beforeEach(() => {
+    memory = new Map([
+      [
+        "/projects/demo/deploy",
+        {
+          content: "Deploys go out on Tuesdays.",
+          description: "Deploy rules [session:conv_alpha]",
+        },
+      ],
+      [
+        "/projects/demo/testing",
+        {
+          content: "Run the slow suite nightly.",
+          description: "How tests run [session:conv_beta]",
+        },
+      ],
+      ["/projects/other/notes", { content: "Elsewhere.", description: null }],
+    ]);
+    server.respond = (request) => {
+      const [route, queryString] = request.path.split("?");
+      if (!route.startsWith("/v1/memory/")) return undefined;
+      if (memory === null) return notFound;
+      const params = new URLSearchParams(queryString);
+      if (route === "/v1/memory/search") return notFound;
+      if (route === "/v1/memory/entries") {
+        const prefix = params.get("prefix") ?? "";
+        const entries = [...memory.entries()]
+          .filter(([path]) => path === prefix || path.startsWith(`${prefix}/`))
+          .map(([path, entry]) => wire(path, entry, false));
+        return { status: 200, json: { entries, next_page_token: null } };
+      }
+      if (request.method === "PUT") {
+        const body = request.body as { path: string; content: string; description: string | null };
+        memory.set(body.path, { content: body.content, description: body.description });
+        return { status: 200, json: wire(body.path, memory.get(body.path)!, true) };
+      }
+      const path = params.get("path") ?? "";
+      const entry = memory.get(path);
+      if (request.method === "DELETE") {
+        return { status: 200, json: { deleted: memory.delete(path) } };
+      }
+      return entry ? { status: 200, json: wire(path, entry, true) } : notFound;
+    };
+    client.clear();
+    graphData.rows = [
+      row("conv_alpha", "Alpha", { workspace: "/src/demo" }),
+      row("conv_beta", "Beta", { parent_session_id: "conv_alpha", workspace: "/src/demo" }),
+      row("conv_gamma", "Gamma", { workspace: "/src/demo" }),
+    ];
+  });
+  afterEach(() => {
+    server.respond = null;
+  });
+
+  const openPanel = async () => {
+    renderGraph();
+    fireEvent.click(screen.getByRole("button", { name: "Project memory" }));
+    await settle();
+    await settle();
+    return within(screen.getByTestId("project-graph-memory"));
+  };
+
+  it("makes no memory request until the panel or the overlay is asked for", async () => {
+    renderGraph();
+    await settle();
+    expect(server.requests.filter((request) => request.path.startsWith("/v1/memory"))).toEqual([]);
+  });
+
+  it("shows how to switch memory on while the server has it off", async () => {
+    memory = null;
+    const panel = await openPanel();
+    expect(panel.getByTestId("project-graph-memory-off")).toHaveTextContent(
+      "Long-term memory is off on this Omnigent server.",
+    );
+    expect(panel.getByText("OMNIGENT_FEATURES=memory")).toBeInTheDocument();
+    expect(panel.queryByRole("button", { name: "Add" })).toBeNull();
+    // Switched on meanwhile: checking again finds it.
+    memory = new Map();
+    fireEvent.click(panel.getByRole("button", { name: "Check again" }));
+    await settle();
+    await settle();
+    expect(panel.getByTestId("project-graph-memory-empty")).toBeInTheDocument();
+  });
+
+  it("lists the project's memories, guessed from the sessions' workspace, and filters them", async () => {
+    const panel = await openPanel();
+    const names = () =>
+      panel
+        .getAllByTestId("project-graph-memory-row")
+        .map((item) => item.textContent?.split("2026")[0]);
+    expect(names()).toEqual(["deploy", "testing"]);
+    // Tags stay out of the description a person reads.
+    expect(panel.getByText("Deploy rules")).toBeInTheDocument();
+    fireEvent.change(panel.getByRole("searchbox", { name: "Search project memories" }), {
+      target: { value: "tests" },
+    });
+    await settle();
+    expect(names()).toEqual(["testing"]);
+  });
+
+  it("reads a memory and jumps to the session that tagged it", async () => {
+    const panel = await openPanel();
+    fireEvent.click(panel.getByRole("button", { name: /deploy/ }));
+    await settle();
+    expect(panel.getByTestId("project-graph-memory-detail")).toHaveTextContent(
+      "Deploys go out on Tuesdays.",
+    );
+    fireEvent.click(panel.getByRole("button", { name: "Alpha" }));
+    await settle();
+    expect(flow.setCenter).toHaveBeenCalled();
+  });
+
+  it("adds a memory under the project's path", async () => {
+    const panel = await openPanel();
+    fireEvent.click(panel.getByRole("button", { name: "Add" }));
+    fireEvent.change(panel.getByLabelText("Name"), { target: { value: "bad//name" } });
+    expect(panel.getByRole("alert")).toHaveTextContent("The name has an empty part.");
+    expect(panel.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(panel.getByLabelText("Name"), { target: { value: "release/checklist" } });
+    fireEvent.change(panel.getByLabelText(/One-line description/), {
+      target: { value: "Before a release" },
+    });
+    fireEvent.change(panel.getByLabelText("Content (markdown)"), {
+      target: { value: "Tag, then announce." },
+    });
+    fireEvent.click(panel.getByRole("button", { name: "Save" }));
+    await settle();
+    await settle();
+    expect(memory!.get("/projects/demo/release/checklist")).toEqual({
+      content: "Tag, then announce.",
+      description: "Before a release",
+    });
+    expect(panel.getByTestId("project-graph-memory-detail")).toHaveTextContent("release/checklist");
+  });
+
+  it("edits a memory in place and keeps its session tags", async () => {
+    const panel = await openPanel();
+    fireEvent.click(panel.getByRole("button", { name: /deploy/ }));
+    await settle();
+    fireEvent.click(panel.getByRole("button", { name: "Edit" }));
+    await settle();
+    expect(panel.getByLabelText("Name")).toBeDisabled();
+    expect(panel.getByLabelText(/One-line description/)).toHaveValue("Deploy rules");
+    fireEvent.change(panel.getByLabelText(/One-line description/), {
+      target: { value: "Deploy schedule" },
+    });
+    fireEvent.change(panel.getByLabelText("Content (markdown)"), {
+      target: { value: "Deploys go out on Thursdays." },
+    });
+    fireEvent.click(panel.getByRole("button", { name: "Save" }));
+    await settle();
+    await settle();
+    expect(memory!.get("/projects/demo/deploy")).toEqual({
+      content: "Deploys go out on Thursdays.",
+      description: "Deploy schedule [session:conv_alpha]",
+    });
+  });
+
+  it("deletes a memory only after a second, explicit click", async () => {
+    const panel = await openPanel();
+    fireEvent.click(panel.getByRole("button", { name: /testing/ }));
+    await settle();
+    fireEvent.click(panel.getByRole("button", { name: "Delete" }));
+    expect(memory!.has("/projects/demo/testing")).toBe(true);
+    fireEvent.click(panel.getByRole("button", { name: "Delete memory" }));
+    await settle();
+    await settle();
+    expect(memory!.has("/projects/demo/testing")).toBe(false);
+    expect(
+      panel.getAllByTestId("project-graph-memory-row").map((item) => item.textContent),
+    ).toHaveLength(1);
+  });
+
+  it("reads another project's memories when the viewer names it", async () => {
+    const panel = await openPanel();
+    const field = panel.getByLabelText("Memories filed under");
+    expect(field).toHaveValue("demo");
+    fireEvent.change(field, { target: { value: "other" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await settle();
+    await settle();
+    expect(
+      within(screen.getByTestId("project-graph-memory"))
+        .getAllByTestId("project-graph-memory-row")
+        .map((item) => item.textContent),
+    ).toEqual([expect.stringContaining("notes")]);
+  });
+
+  it("counts tagged memories on each card when the Memory overlay is on", async () => {
+    renderGraph();
+    expect(screen.queryByTestId("project-graph-memory-count")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Memory" }));
+    await settle();
+    await settle();
+    const counts = screen
+      .getAllByTestId("project-graph-node")
+      .map((node) => [
+        node.dataset.sessionId,
+        within(node).queryByTestId("project-graph-memory-count")?.textContent ?? null,
+      ]);
+    expect(counts).toEqual([
+      ["conv_alpha", expect.stringMatching(/^1/)],
+      ["conv_beta", expect.stringMatching(/^1/)],
+      ["conv_gamma", null],
+    ]);
+    expect(saved.get(projectGraphStorageKey(null, "demo"))).toMatchObject({
+      overlays: { cost: false, context: false, memory: true },
+    });
+  });
+
+  it("shows no counts, and no error, with the overlay on while memory is off", async () => {
+    memory = null;
+    renderGraph();
+    fireEvent.click(screen.getByRole("button", { name: "Memory" }));
+    await settle();
+    await settle();
+    expect(screen.queryByTestId("project-graph-memory-count")).toBeNull();
+    expect(screen.getAllByTestId("project-graph-node")).toHaveLength(3);
+  });
+});
