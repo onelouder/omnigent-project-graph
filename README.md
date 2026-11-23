@@ -41,42 +41,20 @@ endpoints and theme tokens.
   agents remember about the project, with search, add, edit and delete. It
   reads Omnigent's built-in long-term memory under `/projects/<repo>/`
   through the server's existing `/v1/memory` routes.
-- When memory is off on the server, the panel says so and shows how to turn
-  it on (`OMNIGENT_FEATURES=memory`); nothing else in the graph changes.
+- When memory is off on the server (Omnigent's default), the panel says so
+  and shows how to turn it on (`OMNIGENT_FEATURES=memory`); nothing else in
+  the graph changes.
 - Memory providers: the panel talks to memory through one small interface.
   Omnigent memory is the default; another memory system plugs in without
-  editing this overlay. See [docs/memory-providers.md](docs/memory-providers.md).
-- Memory overlay (optional, best-effort): with the session-tagging
-  instruction below in place, each card shows how many project memories its
-  session wrote, and the branches that wrote to memory are highlighted.
+  editing this overlay.
+- Memory overlay (optional, best-effort): once agents are asked to tag the
+  memories they write with their session id, each card shows how many
+  project memories its session wrote, and the branches that wrote to memory
+  are highlighted.
 
-#### Which memories belong to a project
-
-Omnigent tells agents to file project memories under their repository's
-name (`/projects/<repo>/`), which need not match the Omnigent project's name.
-The panel guesses the name from the sessions' workspace directories and
-from the names memory already holds, and shows it in **Memories filed
-under**. Change it there if the guess is wrong; the choice is saved per
-project in the browser.
-
-#### Session tagging
-
-Omnigent memory does not record which session wrote an entry. To let the
-graph show it, add this to the project's agent instructions (`AGENTS.md`,
-`CLAUDE.md` or similar). The panel has a copy button for it.
-
-```
-When you save or update a project memory (memory_write under /projects/<repo>/),
-end its description with [session:<your session id>]. Your session id is the
-session_id that sys_session_get_info returns when called with no arguments.
-Keep the [session:...] tags already on a description you update, newest last,
-three at most. If you can't find your session id, leave the tag off.
-```
-
-This is best-effort. A session counts only for memories it tagged, so an
-agent that skips the instruction, or a memory you add by hand, is not
-counted. The panel hides the tags when it shows a description and keeps them
-when you edit one.
+Setup, the tagging instruction, troubleshooting and limits are in
+[docs/project-memory.md](docs/project-memory.md). Adding another memory
+system is in [docs/memory-providers.md](docs/memory-providers.md).
 
 ### Feature gate
 
@@ -95,6 +73,7 @@ scripts/verify.sh     run the graph's tests, type-check and lint in that checkou
 scripts/lib/overlay_state.sh   record-and-restore install engine (shared with omnigent-stack)
 tests/drift-test.sh   install/uninstall drift tests against a throwaway upstream worktree
 COMPATIBILITY.md      Omnigent commits this has been tested against
+docs/project-memory.md     set up and use the Project Memory panel
 docs/memory-providers.md   how to plug in another memory system
 ```
 
@@ -227,15 +206,8 @@ upgrade.
   limit, so very deep trees show only their first levels.
 - Cost totals are inclusive per branch and may be estimates, as reported by
   Omnigent.
-- Memory belongs to the signed-in user, so the panel shows the viewer's own
-  memories, not a project owner's.
-- Omnigent's default memory backend cannot search, so the panel filters by
-  name and description there; content is searched only on a backend that
-  ranks (Hindsight).
-- A memory's path cannot be renamed, and there are no versions: saving an
-  edit replaces the entry, including a change an agent made meanwhile.
-- The Memory overlay reads at most 1,000 of a project's memories and counts
-  only tagged ones (see Session tagging).
+- Project memory has its own limits (search, edits, tagging); see
+  [docs/project-memory.md](docs/project-memory.md#limits).
 
 ## License
 

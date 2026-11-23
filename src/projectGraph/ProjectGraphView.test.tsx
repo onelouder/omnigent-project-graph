@@ -1112,6 +1112,16 @@ describe("ProjectGraphView project memory", () => {
     expect(flow.setCenter).toHaveBeenCalled();
   });
 
+  it("closes on Escape, but not over a form with a draft in it", async () => {
+    const panel = await openPanel();
+    fireEvent.click(panel.getByRole("button", { name: "Add" }));
+    fireEvent.keyDown(panel.getByLabelText("Name"), { key: "Escape" });
+    expect(screen.getByTestId("project-graph-memory-form")).toBeInTheDocument();
+    fireEvent.click(panel.getByRole("button", { name: "Cancel" }));
+    fireEvent.keyDown(panel.getByRole("searchbox"), { key: "Escape" });
+    expect(screen.queryByTestId("project-graph-memory")).toBeNull();
+  });
+
   it("adds a memory under the project's path", async () => {
     const panel = await openPanel();
     fireEvent.click(panel.getByRole("button", { name: "Add" }));

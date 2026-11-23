@@ -9,7 +9,7 @@ suite, `pnpm type-check`, `pnpm lint` and `pnpm build`.
 | --------------- | ---------- | --------------------- | ----------------------------------------- |
 | `2f5296a8b`     | 2026-11    | development base      | verified during development               |
 | `31874a169`     | 2026-11-22 | plain apply; `tests/drift-test.sh` passes | 124 tests passed (12 files); all green |
-| `d09ca3367`     | 2026-11-22 | plain apply           | 173 tests passed (16 files); all green; with project memory |
+| `d09ca3367`     | 2026-11-22 | plain apply           | 174 tests passed (16 files); all green; with project memory |
 
 The integration patch touches only:
 

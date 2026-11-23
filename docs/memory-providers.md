@@ -8,6 +8,9 @@ Omnigent's built-in memory is the default provider
 and a working example. Any other memory system can be added the same way,
 without editing this overlay.
 
+For setting up and using the panel itself, see
+[project-memory.md](project-memory.md).
+
 A provider runs in the browser. It needs an HTTP endpoint the browser can
 call: one served from the Omnigent origin, or one that allows that origin
 with CORS and has its own authentication. A memory system with only a CLI or

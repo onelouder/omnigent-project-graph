@@ -113,8 +113,12 @@ export function ProjectGraphMemory({
     <aside
       aria-label="Project memory"
       data-testid="project-graph-memory"
-      // Keys typed in the panel's fields stay in the panel.
-      onKeyDown={(event) => event.stopPropagation()}
+      // Keys typed in the panel's fields stay in the panel. Escape closes it,
+      // except over a form, where it would throw away what was typed.
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Escape" && mode.kind !== "edit") onClose();
+      }}
       className="menu-surface pointer-events-auto absolute top-3 right-3 z-30 flex max-h-[calc(100%-1.5rem)] w-[420px] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-xl shadow-card"
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
